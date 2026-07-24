@@ -433,7 +433,7 @@ async def dev_trigger_entity_validation_(session_id, session) -> Dict:
 
         try:
             # Step 1: Make HTTP request to trigger supplier name validation
-            response = trigger_supplier_validation(session_id, jwt_token.access_token)
+            response = await trigger_supplier_validation(session_id, jwt_token.access_token)
             logger.info(f"Trigger Name Validation Response: {response}")
             
             # Return the exact response received from the service
@@ -486,7 +486,7 @@ async def dev_trigger_analysis_(session_id, session) -> Dict:
 
         try:
             # Step 1: Make HTTP request to trigger supplier name validation
-            response = trigger_analysis(session_id, jwt_token.access_token)
+            response = await trigger_analysis(session_id, jwt_token.access_token)
             logger.info(f"Trigger Analysis Response: {response}")
             
             # Return the exact response received from the service

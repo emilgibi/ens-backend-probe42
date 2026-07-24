@@ -2,6 +2,7 @@ import asyncio
 from typing import Dict
 import pycountry
 import requests
+import httpx
 from app.core.config import get_settings
 from app.core.security.jwt import create_jwt_token
 from app.core.supplier.supplier import update_suggestions_bulk
@@ -138,7 +139,7 @@ async def process_excel_file(file_contents, current_user, session) -> Dict:
             detail=f"Error processing the Excel file: {str(error)}"
         )
 
-def trigger_supplier_validation(session_id: str, auth_token: str):
+async def trigger_supplier_validation(session_id: str, auth_token: str):
     """
     Sends a POST request to trigger supplier validation.
 
@@ -161,18 +162,22 @@ def trigger_supplier_validation(session_id: str, auth_token: str):
     }
 
     try:
-        # Making the POST request
-        response = requests.post(url, json=payload, headers=headers)
-
-        # Check response status
-        response.raise_for_status()  # Raise error for bad status codes
-
-        # Return JSON response
-        return response.json()
-    except requests.exceptions.RequestException as e:
+        # Was requests.post() with NO timeout, called synchronously
+        # (without await) from inside an async handler — a genuinely
+        # blocking call with no timeout freezes the entire uvicorn event
+        # loop for every user until the orchestration eventually responds
+        # (or never does). httpx.AsyncClient with an explicit timeout
+        # fixes both problems: it's a real coroutine that yields control
+        # back to the event loop instead of blocking it, and it can no
+        # longer hang forever.
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()  # Raise error for bad status codes
+            return response.json()
+    except httpx.HTTPError as e:
         return {"error": str(e)}
     
-def trigger_analysis(session_id: str, auth_token: str):
+async def trigger_analysis(session_id: str, auth_token: str):
     """
     Sends a POST request to trigger supplier validation.
 
@@ -195,17 +200,12 @@ def trigger_analysis(session_id: str, auth_token: str):
     }
 
     try:
-        # Making the POST request
-        response = requests.post(url, json=payload, headers=headers)
-
-        # Check response status
-        response.raise_for_status()  # Raise error for bad status codes
-
-        # Return JSON response
-        return response.json()
-    except requests.exceptions.RequestException as e:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()  # Raise error for bad status codes
+            return response.json()
+    except httpx.HTTPError as e:
         return {"error": str(e)}
-    
 async def run_full_pipeline_background(session_id, session):
     try:
         # Take session ID
@@ -220,7 +220,7 @@ async def run_full_pipeline_background(session_id, session):
 
         try:
             # Step 1: Make HTTP request to trigger supplier name validation
-            trigger_supplier_validation_response = trigger_supplier_validation(session_id, jwt_token.access_token)
+            trigger_supplier_validation_response = await trigger_supplier_validation(session_id, jwt_token.access_token)
             logger.info(f"Trigger Name Validation Response {trigger_supplier_validation_response}")
         except Exception as e:
             logger.error(f"Error triggering supplier validation:{str(e)}")
@@ -325,7 +325,7 @@ async def run_full_pipeline_background(session_id, session):
             
         try:
             # Trigger analysis pipeline
-            trigger_analysis_response = trigger_analysis(session_id, jwt_token.access_token)
+            trigger_analysis_response = await trigger_analysis(session_id, jwt_token.access_token)
             logger.info(f"Analysis pipeline triggered successfully: {trigger_analysis_response}")
         except Exception as e:
             logger.error(f"Error triggering analysis pipeline:{str(e)}")
